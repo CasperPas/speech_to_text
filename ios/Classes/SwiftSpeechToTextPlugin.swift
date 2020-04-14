@@ -16,6 +16,7 @@ public enum SwiftSpeechToTextCallbackMethods: String {
     case textRecognition
     case notifyStatus
     case notifyError
+    case soundLevelChange
 }
 
 public enum SpeechToTextStatus: String {
@@ -52,6 +53,7 @@ public class SwiftSpeechToTextPlugin: NSObject, FlutterPlugin {
     private var rememberedAudioCategory: AVAudioSession.Category?
     private var previousLocale: Locale?
     private var returnPartialResults: Bool = true
+    private var speechVolume: Float = 0.0
     private let audioSession = AVAudioSession.sharedInstance()
     private let audioEngine = AVAudioEngine()
     private let jsonEncoder = JSONEncoder()
@@ -116,11 +118,11 @@ public class SwiftSpeechToTextPlugin: NSObject, FlutterPlugin {
                 success = status == SFSpeechRecognizerAuthorizationStatus.authorized
                 if ( success ) {
                     AVAudioSession.sharedInstance().requestRecordPermission({(granted: Bool)-> Void in
-                       if granted {
-                           self.setupSpeechRecognition(result)
-                       } else{
-                           self.initResult( false, result );
-                       }
+                        if granted {
+                            self.setupSpeechRecognition(result)
+                        } else{
+                            self.initResult( false, result );
+                        }
                     })
                 }
                 else {
@@ -170,10 +172,10 @@ public class SwiftSpeechToTextPlugin: NSObject, FlutterPlugin {
         }
         recognizer?.delegate = self
         setupListeningSound()
-
+        
         initResult( true, result );
     }
-
+    
     private func setupRecognizerForLocale( locale: Locale ) {
         if ( previousLocale == locale ) {
             return
@@ -243,6 +245,15 @@ public class SwiftSpeechToTextPlugin: NSObject, FlutterPlugin {
             let recordingFormat = inputNode.outputFormat(forBus: self.busForNodeTap)
             inputNode.installTap(onBus: self.busForNodeTap, bufferSize: self.speechBufferSize, format: recordingFormat) { (buffer: AVAudioPCMBuffer, when: AVAudioTime) in
                 currentRequest.append(buffer)
+                var volume = self.getVolume(from: buffer, bufferSize: 1024) * 150
+                print("========= Volume: \(volume)")
+                if volume > 10 {
+                    volume = 10
+                }
+                if (volume != self.speechVolume) {
+                    self.speechVolume = volume
+                    self.invokeFlutter( SwiftSpeechToTextCallbackMethods.soundLevelChange, arguments: volume )
+                }
             }
             
             self.audioEngine.prepare()
@@ -251,6 +262,39 @@ public class SwiftSpeechToTextPlugin: NSObject, FlutterPlugin {
         }
         catch {
             result( false )
+        }
+    }
+    
+    private func getVolume(from buffer: AVAudioPCMBuffer, bufferSize: Int) -> Float {
+        guard let channelData = buffer.floatChannelData?[0] else {
+            return 0
+        }
+        
+        let channelDataArray = Array(UnsafeBufferPointer(start:channelData, count: bufferSize))
+        
+        var outEnvelope = [Float]()
+        var envelopeState:Float = 0
+        let envConstantAtk:Float = 0.16
+        let envConstantDec:Float = 0.003
+        
+        for sample in channelDataArray {
+            let rectified = abs(sample)
+            
+            if envelopeState < rectified {
+                envelopeState += envConstantAtk * (rectified - envelopeState)
+            } else {
+                envelopeState += envConstantDec * (rectified - envelopeState)
+            }
+            outEnvelope.append(envelopeState)
+        }
+        
+        // 0.007 is the low pass filter to prevent
+        // getting the noise entering from the microphone
+        if let maxVolume = outEnvelope.max(),
+            maxVolume > Float(0.015) {
+            return maxVolume
+        } else {
+            return 0.0
         }
     }
     
@@ -318,7 +362,7 @@ public class SwiftSpeechToTextPlugin: NSObject, FlutterPlugin {
             self.channel.invokeMethod( method.rawValue, arguments: arguments )
         }
     }
-        
+    
 }
 
 @available(iOS 10.0, *)
@@ -362,7 +406,7 @@ extension SwiftSpeechToTextPlugin : SFSpeechRecognitionTaskDelegate {
 extension SwiftSpeechToTextPlugin : AVAudioPlayerDelegate {
     
     public func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer,
-                                     successfully flag: Bool) {
+                                            successfully flag: Bool) {
         
     }
 }
