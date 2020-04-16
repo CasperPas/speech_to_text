@@ -160,15 +160,16 @@ class SpeechToText {
   /// [debugLogging] controls whether there is detailed logging from the underlying
   /// plugins. It is off by default, usually only useful for troubleshooting issues
   /// with a paritcular OS version or device, fairly verbose
-  Future<bool> initialize(
-      {SpeechErrorListener onError,
-      SpeechStatusListener onStatus,
-      debugLogging = false}) async {
+  Future<bool> initialize({
+    SpeechErrorListener onError,
+    SpeechStatusListener onStatus,
+    bool debugLogging = false,
+  }) async {
+    errorListener = onError;
+    statusListener = onStatus;
     if (_initWorked) {
       return Future.value(_initWorked);
     }
-    errorListener = onError;
-    statusListener = onStatus;
     channel.setMethodCallHandler(_handleCallbacks);
     _initWorked = await channel
         .invokeMethod('initialize', {"debugLogging": debugLogging});
@@ -254,13 +255,14 @@ class SpeechToText {
   ///
   /// [partialResults] if true the listen reports results as they are recognized,
   /// when false only final results are reported. Defaults to true.
-  Future listen(
-      {SpeechResultListener onResult,
-      Duration listenFor,
-      String localeId,
-      SpeechSoundLevelChange onSoundLevelChange,
-      cancelOnError = false,
-      partialResults = true}) async {
+  Future listen({
+    SpeechResultListener onResult,
+    Duration listenFor,
+    String localeId,
+    SpeechSoundLevelChange onSoundLevelChange,
+    bool cancelOnError = false,
+    bool partialResults = true,
+  }) async {
     if (!_initWorked) {
       throw SpeechToTextNotInitializedException();
     }
